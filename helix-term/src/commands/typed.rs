@@ -2348,16 +2348,11 @@ fn git_blame_line(
     let range = selection.primary();
     let line = range.cursor_line(doc.text().slice(..)) + 1;
 
-    let mut args: Vec<Cow<'_, str>> = Vec::new();
-    args.push("git".into());
-    args.push("blame".into());
-    args.push("--porcelain".into());
-    args.push("-L".into());
-    args.push(format!("{},{}", line, line).into());
-    args.push(current_path.into());
-
     let shell = cx.editor.config().shell.clone();
-    let args = args.join(" ");
+    let args = format!(
+        "git blame --porcelain -L {},{} {}",
+        line, line, current_path
+    );
 
     let callback = async move {
         let output = shell_impl_async(&shell, &args, None).await?;
