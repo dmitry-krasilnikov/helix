@@ -2318,6 +2318,71 @@ fn run_shell_command(
     Ok(())
 }
 
+fn git_blame_line(
+    cx: &mut compositor::Context,
+    _args: &[Cow<str>],
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    let mut errors: Vec<&'static str> = Vec::new();
+    let (view, doc) = current!(cx.editor);
+    let current_path = match doc.path() {
+        Some(path_buf) => match path_buf.to_str() {
+            Some(path) => path.to_owned(),
+            None => {
+                errors.push("current buffer's filename is invalid");
+                bail!("{:?}", errors);
+            }
+        },
+        None => {
+            errors.push("cannot use Git blame without a filename");
+            bail!("{:?}", errors);
+        }
+    };
+    let selection = doc.selection(view.id);
+    let range = selection.primary();
+    let line = range.cursor_line(doc.text().slice(..)) + 1;
+
+    let mut args: Vec<Cow<'_, str>> = Vec::new();
+    args.push("git".into());
+    args.push("blame".into());
+    args.push("-L".into());
+    args.push(format!("{},{}", line, line).into());
+    args.push(current_path.into());
+
+    let shell = cx.editor.config().shell.clone();
+    let args = args.join(" ");
+
+    let callback = async move {
+        let output = shell_impl_async(&shell, &args, None).await?;
+        let call: job::Callback = Callback::EditorCompositor(Box::new(
+            move |editor: &mut Editor, compositor: &mut Compositor| {
+                if !output.is_empty() {
+                    let contents = ui::Markdown::new(
+                        format!("```sh\n{}\n```", output),
+                        editor.syn_loader.clone(),
+                    );
+                    let popup = Popup::new("git", contents)
+                        .position(Some(helix_core::Position::new(
+                            editor.cursor().0.unwrap_or_default().row,
+                            2,
+                        )))
+                        .auto_close(true);
+                    compositor.replace_or_push("git", popup);
+                }
+                editor.set_status("Command succeeded");
+            },
+        ));
+        Ok(call)
+    };
+    cx.jobs.callback(callback);
+
+    Ok(())
+}
+
 fn reset_diff_change(
     cx: &mut compositor::Context,
     args: &[Cow<str>],
@@ -3098,6 +3163,13 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         doc: "Run a shell command",
         fun: run_shell_command,
         signature: CommandSignature::all(completers::filename)
+    },
+    TypableCommand {
+        name: "git-blame-line",
+        aliases: &[],
+        doc: "Blame current line using Git",
+        fun: git_blame_line,
+        signature: CommandSignature::none(),
     },
     TypableCommand {
         name: "reset-diff-change",
