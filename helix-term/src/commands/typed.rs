@@ -6,6 +6,8 @@ use crate::job::Job;
 
 use super::*;
 
+use chrono::Local;
+use chrono::TimeZone;
 use helix_core::fuzzy::fuzzy_match;
 use helix_core::indent::MAX_INDENT;
 use helix_core::{line_ending, shellwords::Shellwords};
@@ -2349,6 +2351,7 @@ fn git_blame_line(
     let mut args: Vec<Cow<'_, str>> = Vec::new();
     args.push("git".into());
     args.push("blame".into());
+    args.push("--porcelain".into());
     args.push("-L".into());
     args.push(format!("{},{}", line, line).into());
     args.push(current_path.into());
@@ -2361,8 +2364,28 @@ fn git_blame_line(
         let call: job::Callback = Callback::EditorCompositor(Box::new(
             move |editor: &mut Editor, compositor: &mut Compositor| {
                 if !output.is_empty() {
+                    let mut author = "Unknown";
+                    let mut time = "Unknown";
+                    let mut summary = "Unknown";
+                    for line in output.lines() {
+                        if line.starts_with("author ") {
+                            author = line.split_once(' ').unwrap().1;
+                        }
+                        if line.starts_with("author-time ") {
+                            time = line.split_once(' ').unwrap().1;
+                        }
+                        if line.starts_with("summary ") {
+                            summary = line.split_once(' ').unwrap().1;
+                        }
+                    }
+                    let date_time = Local.timestamp_opt(time.parse().unwrap(), 0).unwrap();
                     let contents = ui::Markdown::new(
-                        format!("```sh\n{}\n```", output),
+                        format!(
+                            "\n{}, {} - {}\n",
+                            author,
+                            date_time.format("%F %T"),
+                            summary
+                        ),
                         editor.syn_loader.clone(),
                     );
                     let popup = Popup::new("git", contents)
